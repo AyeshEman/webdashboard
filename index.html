@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Building Environmental Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4edf9 100%);
+            color: #1f2937;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        header { text-align: center; margin-bottom: 30px; }
+        h1 { color: #1e40af; margin-bottom: 8px; }
+
+        /* Real-time Toast Notifications (Top Right) */
+        #notification-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .notification {
+            background: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-left: 5px solid #3b82f6;
+            animation: slideIn 0.3s ease-out;
+            min-width: 250px;
+        }
+        .notification.alert { border-left-color: #ef4444; }
+        @keyframes slideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
+        /* Map and Main Cards */
+        .map-card, .building-card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+            margin-bottom: 25px;
+            padding: 20px;
+        }
+        #map { height: 450px; width: 100%; border-radius: 12px; }
+
+        /* Building Grid Section */
+        .buildings-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+            gap: 20px;
+        }
+        .building-header {
+            background: #f8fafc;
+            padding: 12px 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-left: 4px solid #1e40af;
+            font-weight: 700;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Floor Grid Layout */
+        .floor-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .floor-item {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 12px 8px;
+            text-align: center;
+        }
+        .floor-label { font-size: 0.75rem; color: #64748b; font-weight: 600; margin-bottom: 5px; }
+        .val-t { color: #dc2626; font-weight: 700; font-size: 0.9rem; }
+        .val-h { color: #0891b2; font-weight: 700; font-size: 0.9rem; }
+
+        /* IN-CARD ALERT STYLING */
+        .floor-alert-box {
+            background: #fff5f5;
+            border: 1px solid #feb2b2;
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 0.85rem;
+            color: #c53030;
+            display: none; /* Shown only when triggered */
+        }
+        .floor-alert-box.active { display: block; }
+        .alert-item { margin-bottom: 4px; font-weight: 600; }
+
+        /* Modal Styling */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: white; width: 90%; max-width: 800px;
+            border-radius: 20px; overflow: hidden;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.2);
+        }
+        .modal-header { background: #1e40af; color: white; padding: 20px; display: flex; justify-content: space-between; }
+        .modal-body { padding: 25px; }
+
+        .last-updated { text-align: center; margin-top: 20px; color: #64748b; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+
+    <div id="notification-container"></div>
+
+    <div class="container">
+        <header>
+            <h1>Global Environmental Monitoring</h1>
+            <p>Click markers for English labels and real-time building details</p>
+        </header>
+
+        <div class="map-card">
+            <div id="map"></div>
+        </div>
+
+        <div class="buildings-row">
+            <div class="building-card">
+                <div class="building-header">
+                    <span>ISLAMABAD HQ (ISB)</span>
+                    <small style="color:#64748b; font-weight:400;">5 Floors</small>
+                </div>
+                <div id="grid-ISB" class="floor-grid"></div>
+                <div id="alert-ISB" class="floor-alert-box"></div>
+            </div>
+
+            <div class="building-card">
+                <div class="building-header">
+                    <span>LAHORE BRANCH (LHR)</span>
+                    <small style="color:#64748b; font-weight:400;">5 Floors</small>
+                </div>
+                <div id="grid-LHR" class="floor-grid"></div>
+                <div id="alert-LHR" class="floor-alert-box"></div>
+            </div>
+        </div>
+        
+        <div class="last-updated">Last updated: <span id="lastUpdatedTime"></span></div>
+    </div>
+
+    <div id="buildingModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Building Details</h2>
+                <button style="background:none; border:none; color:white; font-size:24px; cursor:pointer;" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="modalFloorGrid" class="floor-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentSensorData = {};
+
+        // System-wide Toast Notifications
+        function showNotification(message, type = 'info') {
+            const container = document.getElementById('notification-container');
+            const toast = document.createElement('div');
+            toast.className = `notification ${type === 'alert' ? 'alert' : ''}`;
+            toast.innerHTML = `<strong>${type === 'alert' ? '⚠️ CRITICAL' : 'ℹ️ SYSTEM'}</strong><br>${message}`;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 4500);
+        }
+
+        // Data Generation with Custom Threshold Logic (<10 or >30)
+        function generateData() {
+            const data = { 'ISB': {}, 'LHR': {} };
+            ['ISB', 'LHR'].forEach(city => {
+                for (let f = 1; f <= 5; f++) {
+                    // Random temp between 5 and 35 to test thresholds
+                    const t = (5 + Math.random() * 30).toFixed(1);
+                    const h = (30 + Math.random() * 40).toFixed(1);
+                    data[city][f] = { temp: t, hum: h };
+                }
+            });
+            return data;
+        }
+
+        function initMap() {
+            const map = L.map('map').setView([32.6, 73.8], 7);
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '&copy; Esri'
+            }).addTo(map);
+
+            const locations = [
+                { id: 'ISB', name: "Islamabad HQ", coords: [33.6844, 73.0479], color: '#3b82f6' },
+                { id: 'LHR', name: "Lahore Branch", coords: [31.5204, 74.3587], color: '#10b981' }
+            ];
+
+            locations.forEach(loc => {
+                const marker = L.circleMarker(loc.coords, { radius: 16, fillColor: loc.color, color: "#fff", weight: 4, fillOpacity: 0.9 }).addTo(map);
+                marker.bindTooltip(`Open ${loc.name} Dashboard`, { direction: 'top' });
+                marker.on('click', () => openModal(loc.id, loc.name));
+            });
+        }
+
+        function updateUI() {
+            ['ISB', 'LHR'].forEach(city => {
+                const grid = document.getElementById(`grid-${city}`);
+                const alertBox = document.getElementById(`alert-${city}`);
+                grid.innerHTML = '';
+                alertBox.innerHTML = '';
+                alertBox.classList.remove('active');
+
+                let alerts = [];
+
+                for (let f = 1; f <= 5; f++) {
+                    const d = currentSensorData[city][f];
+                    const temp = parseFloat(d.temp);
+
+                    // Add to main grid
+                    grid.innerHTML += `
+                        <div class="floor-item">
+                            <div class="floor-label">Floor ${f}</div>
+                            <div class="val-t">${d.temp}°C</div>
+                            <div class="val-h">${d.hum}%</div>
+                        </div>`;
+
+                    // Logic: Threshold Alert Check
+                    if (temp < 10 || temp > 30) {
+                        const status = temp < 10 ? 'TOO COLD' : 'TOO HOT';
+                        alerts.push(`<div class="alert-item">Floor ${f}: ${status} (${d.temp}°C)</div>`);
+                    }
+                }
+
+                if (alerts.length > 0) {
+                    alertBox.innerHTML = `<strong>Local Alerts:</strong>` + alerts.join('');
+                    alertBox.classList.add('active');
+                    showNotification(`${city} office has ${alerts.length} temperature violations!`, 'alert');
+                }
+            });
+        }
+
+        function openModal(buildingId, buildingName) {
+            const modal = document.getElementById('buildingModal');
+            document.getElementById('modalTitle').innerText = `${buildingName}`;
+            const grid = document.getElementById('modalFloorGrid');
+            grid.innerHTML = '';
+            for (let f = 1; f <= 5; f++) {
+                const d = currentSensorData[buildingId][f];
+                grid.innerHTML += `
+                    <div class="floor-item" style="padding:20px;">
+                        <div class="floor-label" style="font-size:1rem;">Floor ${f}</div>
+                        <div class="val-t" style="font-size:1.2rem;">${d.temp}°C</div>
+                        <div class="val-h" style="font-size:1.2rem;">${d.hum}%</div>
+                    </div>`;
+            }
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() { document.getElementById('buildingModal').style.display = 'none'; }
+
+        function refreshData() {
+            currentSensorData = generateData();
+            updateUI();
+            document.getElementById('lastUpdatedTime').textContent = new Date().toLocaleTimeString();
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initMap();
+            refreshData();
+            setInterval(refreshData, 15000); // 15s refresh
+        });
+    </script>
+</body>
+</html>
